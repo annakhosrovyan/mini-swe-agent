@@ -20,6 +20,7 @@ class AgentConfig(BaseModel):
     action_regex: str = r"```bash\s*\n(.*?)\n```"
     step_limit: int = 0
     cost_limit: float = 3.0
+    max_history_messages: int = 0
 
 
 class NonTerminatingException(Exception):
@@ -86,7 +87,12 @@ class DefaultAgent:
         """Query the model and return the response."""
         if 0 < self.config.step_limit <= self.model.n_calls or 0 < self.config.cost_limit <= self.model.cost:
             raise LimitsExceeded()
-        response = self.model.query(self.messages)
+        msgs = self.messages
+        if self.config.max_history_messages > 0 and len(msgs) > 2:
+            head = msgs[:2]
+            tail = msgs[2:][-self.config.max_history_messages :]
+            msgs = head + tail
+        response = self.model.query(msgs)
         self.add_message("assistant", **response)
         return response
 
