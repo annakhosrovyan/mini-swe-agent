@@ -1,5 +1,6 @@
 """Basic agent class. See https://mini-swe-agent.com/latest/advanced/control_flow/ for visual explanation."""
 
+import fnmatch
 import re
 import subprocess
 import time
@@ -11,7 +12,6 @@ from minisweagent import Environment, Model
 
 
 class AgentConfig(BaseModel):
-    # Check the config files in minisweagent/config for example settings
     system_template: str
     instance_template: str
     timeout_template: str
@@ -21,6 +21,8 @@ class AgentConfig(BaseModel):
     step_limit: int = 0
     cost_limit: float = 3.0
     max_history_messages: int = 0
+    validate_source_changes: bool = False
+    source_path_patterns: list[str] = ["src/**/*.py", "*.py"]
 
 
 class NonTerminatingException(Exception):
@@ -125,4 +127,35 @@ class DefaultAgent:
         """Raises Submitted exception with final output if the agent has finished its task."""
         lines = output.get("output", "").lstrip().splitlines(keepends=True)
         if lines and lines[0].strip() in ["MINI_SWE_AGENT_FINAL_OUTPUT", "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"]:
-            raise Submitted("".join(lines[1:]))
+            submission = "".join(lines[1:])
+            if self.config.validate_source_changes:
+                if not self._has_source_file_changes(submission):
+                    raise FormatError(
+                        "Submission rejected: No source files were modified. "
+                        "You must modify at least one source file (matching patterns: "
+                        + ", ".join(self.config.source_path_patterns)
+                        + ") for the submission to be valid."
+                    )
+            raise Submitted(submission)
+    
+    def _has_source_file_changes(self, git_diff_output: str) -> bool:
+        """Check if git diff output contains changes to source files."""
+        changed_files = []
+        for line in git_diff_output.splitlines():
+            if line.startswith("diff --git"):
+                parts = line.split()
+                if len(parts) >= 3:
+                    filepath = parts[2].lstrip("a/").lstrip("b/")
+                    changed_files.append(filepath)
+            elif line.startswith("+++") or line.startswith("---"):
+                parts = line.split()
+                if len(parts) >= 2:
+                    filepath = parts[1].lstrip("a/").lstrip("b/")
+                    if filepath != "/dev/null":
+                        changed_files.append(filepath)
+        
+        for filepath in changed_files:
+            for pattern in self.config.source_path_patterns:
+                if fnmatch.fnmatch(filepath, pattern) or filepath.endswith(".py"):
+                    return True
+        return False

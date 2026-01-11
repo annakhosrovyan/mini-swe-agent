@@ -23,6 +23,7 @@ from minisweagent.agents.default import DefaultAgent
 from minisweagent.config import builtin_config_dir, get_config_path
 from minisweagent.environments import get_environment
 from minisweagent.models import get_model
+from minisweagent.retrieval import apply_retrieval_to_config
 from minisweagent.run.extra.utils.batch_progress import RunBatchProgressManager
 from minisweagent.run.utils.save import save_traj
 from minisweagent.utils.log import add_file_handler, logger
@@ -142,6 +143,25 @@ def process_instance(
 
     try:
         env = get_sb_environment(config, instance)
+        retrieval_strategy = config.get("run", {}).get("retrieval_strategy", "none")
+        retrieved_files: list[str] = []
+        if retrieval_strategy and retrieval_strategy != "none":
+            from minisweagent.retrieval.bm25 import run_retrieval_in_container
+            progress_manager.update_instance_status(instance_id, "Running retrieval")
+            lint_output: str | None = None
+            if retrieval_strategy in ("bm25_lint_aware", "bm25_lint", "bm25-lint"):
+                progress_manager.update_instance_status(instance_id, "Running lint for retrieval")
+                lint_command = config.get("run", {}).get("lint_command", "sqlfluff lint .")
+                lint_result = env.execute(f"cd /testbed && {lint_command} 2>&1 || true", timeout=30)
+                lint_output = lint_result.get("output", "")
+            file_extensions = config.get("run", {}).get("retrieval_file_extensions", [".py"])
+            filter_pattern = config.get("run", {}).get("retrieval_filter_pattern", None)
+            rule_id_pattern = config.get("run", {}).get("retrieval_rule_id_pattern", None)
+            retrieved_files = run_retrieval_in_container(
+                env, task, retrieval_strategy, top_k=10, lint_output=lint_output, 
+                file_extensions=file_extensions, filter_pattern=filter_pattern, rule_id_pattern=rule_id_pattern
+            )
+        
         agent = ProgressTrackingAgent(
             model,
             env,
@@ -149,7 +169,7 @@ def process_instance(
             instance_id=instance_id,
             **config.get("agent", {}),
         )
-        exit_status, result = agent.run(task)
+        exit_status, result = agent.run(task, retrieved_files=retrieved_files)
     except Exception as e:
         logger.error(f"Error processing instance {instance_id}: {e}", exc_info=True)
         exit_status, result = type(e).__name__, str(e)
@@ -203,6 +223,7 @@ def main(
     redo_existing: bool = typer.Option(False, "--redo-existing", help="Redo existing instances", rich_help_panel="Data selection"),
     config_spec: Path = typer.Option( builtin_config_dir / "extra" / "swebench.yaml", "-c", "--config", help="Path to a config file", rich_help_panel="Basic"),
     environment_class: str | None = typer.Option( None, "--environment-class", help="Environment type to use. Recommended are docker or singularity", rich_help_panel="Advanced"),
+    retrieval: str = typer.Option("none", "--retrieval", help="Retrieval strategy: none, bm25, bm25_rule_filter, bm25_lint_aware, bm25_two_stage", rich_help_panel="Advanced"),
 ) -> None:
     # fmt: on
     output_path = Path(output)
@@ -230,6 +251,7 @@ def main(
         config.setdefault("model", {})["model_name"] = model
     if model_class is not None:
         config.setdefault("model", {})["model_class"] = model_class
+    config = apply_retrieval_to_config(config, retrieval)
 
     progress_manager = RunBatchProgressManager(len(instances), output_path / f"exit_statuses_{time.time()}.yaml")
 
