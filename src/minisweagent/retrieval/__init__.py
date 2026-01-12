@@ -21,20 +21,20 @@ def _bm25_setup() -> RetrievalSetup:
     )
 
 
-def _bm25_rule_filter_setup() -> RetrievalSetup:
+def _bm25_py_setup() -> RetrievalSetup:
     return RetrievalSetup(
         system_guidelines=(
-            "Retrieval mode: BM25 with rule filtering. Relevant rule files have been suggested. "
-            "Focus on the suggested rule files that match the task description."
+            "Retrieval mode: BM25 (Python files only). Relevant Python files have been suggested based on the task description. "
+            "Start by examining the suggested files to understand the codebase structure."
         )
     )
 
 
-def _bm25_lint_aware_setup() -> RetrievalSetup:
+def _bm25_source_setup() -> RetrievalSetup:
     return RetrievalSetup(
         system_guidelines=(
-            "Retrieval mode: BM25 with lint-aware localization. Files have been suggested based on "
-            "both the task description and lint output analysis. Focus on the suggested files."
+            "Retrieval mode: BM25 (source code only). Relevant source files have been suggested based on the task description. "
+            "Files have been filtered to focus on the main source code directory. Start by examining the suggested files to understand the codebase structure."
         )
     )
 
@@ -42,8 +42,8 @@ def _bm25_lint_aware_setup() -> RetrievalSetup:
 def _bm25_two_stage_setup() -> RetrievalSetup:
     return RetrievalSetup(
         system_guidelines=(
-            "Retrieval mode: BM25 two-stage. Initial candidate rules have been identified, then "
-            "focused retrieval performed. Examine the suggested files carefully."
+            "Retrieval mode: BM25 two-stage. Files have been suggested using a two-stage retrieval process: "
+            "initial candidate generation followed by semantic reranking. Focus on the suggested files to understand the codebase structure."
         )
     )
 
@@ -54,11 +54,11 @@ def get_retrieval_setup(strategy: str) -> RetrievalSetup:
         return _none_setup()
     if s == "bm25":
         return _bm25_setup()
-    if s in ("bm25_rule_filter", "bm25_rule", "bm25-filter"):
-        return _bm25_rule_filter_setup()
-    if s in ("bm25_lint_aware", "bm25_lint", "bm25-lint"):
-        return _bm25_lint_aware_setup()
-    if s in ("bm25_two_stage", "bm25_2stage", "bm25-2stage"):
+    if s == "bm25_py":
+        return _bm25_py_setup()
+    if s == "bm25_source":
+        return _bm25_source_setup()
+    if s == "bm25_two_stage":
         return _bm25_two_stage_setup()
     return _none_setup()
 
@@ -70,6 +70,19 @@ def apply_retrieval_to_config(config: dict, strategy: str) -> dict:
         base = agent_cfg.get("system_template", "")
         if setup.system_guidelines not in base:
             agent_cfg["system_template"] = (base + "\n\n" + setup.system_guidelines).strip()
-    config.setdefault("run", {})["retrieval_strategy"] = strategy
+    run_cfg = config.setdefault("run", {})
+    run_cfg["retrieval_strategy"] = strategy
+    s = strategy.lower().strip()
+    if s == "bm25":
+        run_cfg["retrieval_index_all_files"] = True
+    elif s == "bm25_py":
+        run_cfg["retrieval_index_all_files"] = False
+        run_cfg["retrieval_file_extensions"] = [".py"]
+    elif s == "bm25_source":
+        run_cfg["retrieval_index_all_files"] = False
+        run_cfg["retrieval_file_extensions"] = [".py"]
+    elif s == "bm25_two_stage":
+        run_cfg["retrieval_index_all_files"] = False
+        run_cfg["retrieval_file_extensions"] = [".py"]
     return config
 

@@ -246,8 +246,10 @@ agent:
 run:
   retrieval_file_extensions:
     - ".py"
-  retrieval_filter_pattern: null
-  retrieval_rule_id_pattern: null
+  retrieval_index_all_files: false
+  retrieval_repo_source_paths:
+    sklearn: "sklearn"
+    sqlfluff: "src/sqlfluff"
 
 environment:
   cwd: "/testbed"

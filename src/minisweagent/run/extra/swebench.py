@@ -148,18 +148,29 @@ def process_instance(
         if retrieval_strategy and retrieval_strategy != "none":
             from minisweagent.retrieval.bm25 import run_retrieval_in_container
             progress_manager.update_instance_status(instance_id, "Running retrieval")
-            lint_output: str | None = None
-            if retrieval_strategy in ("bm25_lint_aware", "bm25_lint", "bm25-lint"):
-                progress_manager.update_instance_status(instance_id, "Running lint for retrieval")
-                lint_command = config.get("run", {}).get("lint_command", "sqlfluff lint .")
-                lint_result = env.execute(f"cd /testbed && {lint_command} 2>&1 || true", timeout=30)
-                lint_output = lint_result.get("output", "")
+            entity_name: str | None = None
+            if retrieval_strategy == "bm25_two_stage":
+                progress_manager.update_instance_status(instance_id, "Extracting entity for reranking")
+                entity_prompt = f"Identify the specific Python class or function name that is likely causing the error in this issue. Return ONLY the name, nothing else.\n\nIssue: {task}"
+                try:
+                    response = model.query([{"role": "user", "content": entity_prompt}])
+                    entity_name = response.get("content", "").strip()
+                    if not entity_name:
+                        entity_name = None
+                except Exception:
+                    entity_name = None
             file_extensions = config.get("run", {}).get("retrieval_file_extensions", [".py"])
-            filter_pattern = config.get("run", {}).get("retrieval_filter_pattern", None)
-            rule_id_pattern = config.get("run", {}).get("retrieval_rule_id_pattern", None)
+            index_all_files = config.get("run", {}).get("retrieval_index_all_files", False)
+            source_path_prefix: str | None = None
+            if retrieval_strategy == "bm25_source":
+                repo_name = instance_id.split("__")[0] if "__" in instance_id else None
+                if repo_name:
+                    repo_source_paths = config.get("run", {}).get("retrieval_repo_source_paths", {})
+                    source_path_prefix = repo_source_paths.get(repo_name)
             retrieved_files = run_retrieval_in_container(
-                env, task, retrieval_strategy, top_k=10, lint_output=lint_output, 
-                file_extensions=file_extensions, filter_pattern=filter_pattern, rule_id_pattern=rule_id_pattern
+                env, task, retrieval_strategy, top_k=10,
+                file_extensions=file_extensions, index_all_files=index_all_files,
+                source_path_prefix=source_path_prefix, entity_name=entity_name
             )
         
         agent = ProgressTrackingAgent(
@@ -223,7 +234,7 @@ def main(
     redo_existing: bool = typer.Option(False, "--redo-existing", help="Redo existing instances", rich_help_panel="Data selection"),
     config_spec: Path = typer.Option( builtin_config_dir / "extra" / "swebench.yaml", "-c", "--config", help="Path to a config file", rich_help_panel="Basic"),
     environment_class: str | None = typer.Option( None, "--environment-class", help="Environment type to use. Recommended are docker or singularity", rich_help_panel="Advanced"),
-    retrieval: str = typer.Option("none", "--retrieval", help="Retrieval strategy: none, bm25, bm25_rule_filter, bm25_lint_aware, bm25_two_stage", rich_help_panel="Advanced"),
+    retrieval: str = typer.Option("none", "--retrieval", help="Retrieval strategy: none, bm25 (all files), bm25_py (Python files only), bm25_source (source code only), bm25_two_stage (two-stage with reranking)", rich_help_panel="Advanced"),
 ) -> None:
     # fmt: on
     output_path = Path(output)
