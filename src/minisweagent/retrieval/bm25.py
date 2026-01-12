@@ -94,6 +94,7 @@ if two_stage:
     candidate_files = [(valid_files[i], scores[i]) for i in top_indices if scores[i] > 0]
     if entity_name and candidate_files:
         reranked_files = []
+        entity_pattern = re.escape(entity_name)
         for file_path, bm25_score in candidate_files:
             file_content = None
             for i, vf in enumerate(valid_files):
@@ -102,10 +103,9 @@ if two_stage:
                     break
             if file_content:
                 score_boost = 0
-                entity_pattern = re.escape(entity_name)
-                if re.search(rf"\\bclass\\s+{entity_pattern}\\s*[:\(]", file_content):
+                if re.search(rf"^\s*class\s+{entity_pattern}\s*[:\(]", file_content, re.MULTILINE):
                     score_boost = 100
-                elif re.search(rf"\\bdef\\s+{entity_pattern}\\s*\\(", file_content):
+                elif re.search(rf"^\s*def\s+{entity_pattern}\s*\(", file_content, re.MULTILINE):
                     score_boost = 100
                 reranked_files.append((file_path, bm25_score + score_boost))
             else:
