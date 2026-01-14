@@ -28,7 +28,7 @@ def run_retrieval_in_container(
     source_path_prefix_escaped = (source_path_prefix.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$") if source_path_prefix else "")
     entity_name_escaped = (entity_name.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$") if entity_name else "")
     
-    retrieval_script = f'''python3 <<'BM25_EOF'
+    retrieval_script = rf'''python3 <<'BM25_EOF'
 import json
 import re
 from pathlib import Path
@@ -103,9 +103,9 @@ if two_stage:
                     break
             if file_content:
                 score_boost = 0
-                if re.search(rf"^\s*class\s+{entity_pattern}\s*[:\(]", file_content, re.MULTILINE):
+                if re.search(rf"^\s*class\s+{{entity_pattern}}\s*[:\(]", file_content, re.MULTILINE):
                     score_boost = 100
-                elif re.search(rf"^\s*def\s+{entity_pattern}\s*\(", file_content, re.MULTILINE):
+                elif re.search(rf"^\s*def\s+{{entity_pattern}}\s*\(", file_content, re.MULTILINE):
                     score_boost = 100
                 reranked_files.append((file_path, bm25_score + score_boost))
             else:
