@@ -22,9 +22,14 @@ agent:
     </pr_description>
     {% if retrieved_files %}
     <retrieved_files>
-    The following files have been identified as potentially relevant:
-    {% for file in retrieved_files %}
-    - {{file}}
+    The following files{% if retrieved_files and retrieved_files[0].start is defined %} chunks{% endif %} have been identified as potentially relevant:
+    {% for file_info in retrieved_files %}
+    <file_start:{{file_info.path}}{% if file_info.start is defined %}:{{file_info.start}}-{{file_info.end}}{% endif %}>
+    Path: {{file_info.path}}{% if file_info.start is defined %} (characters {{file_info.start}}-{{file_info.end}}){% endif %}
+    <file_content_start>
+    {{file_info.content}}
+    <file_content_end>
+    </file_end:{{file_info.path}}{% if file_info.start is defined %}:{{file_info.start}}-{{file_info.end}}{% endif %}>
     {% endfor %}
     </retrieved_files>
     {% endif %}
@@ -235,7 +240,7 @@ agent:
     </output_tail>
     {%- endif %}
     Please try another command and make sure to avoid those requiring interactive input.
-  max_history_messages: 8
+  max_history_messages: 0
   step_limit: 250
   cost_limit: 3.
   validate_source_changes: false
@@ -253,7 +258,7 @@ run:
 
 environment:
   cwd: "/testbed"
-  timeout: 300
+  timeout: 2000
   env:
     PAGER: cat
     MANPAGER: cat
@@ -264,11 +269,11 @@ environment:
   environment_class: docker
 
 model:
-  model_name: openai/qwen/qwen2.5-coder-7b-instruct
+  model_name: openai/qwen/qwen3-coder-480b-a35b-instruct
   model_class: litellm
   cost_tracking: ignore_errors
   model_kwargs:
     api_base: https://integrate.api.nvidia.com/v1
-    temperature: 0.1
-    max_tokens: 512
+    temperature: 0
+    max_tokens: 4096
 

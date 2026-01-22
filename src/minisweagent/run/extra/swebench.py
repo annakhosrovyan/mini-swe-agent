@@ -144,34 +144,64 @@ def process_instance(
     try:
         env = get_sb_environment(config, instance)
         retrieval_strategy = config.get("run", {}).get("retrieval_strategy", "none")
-        retrieved_files: list[str] = []
+        retrieved_files = []
         if retrieval_strategy and retrieval_strategy != "none":
-            from minisweagent.retrieval.bm25 import run_retrieval_in_container
             progress_manager.update_instance_status(instance_id, "Running retrieval")
-            entity_name: str | None = None
-            if retrieval_strategy == "bm25_two_stage":
-                progress_manager.update_instance_status(instance_id, "Extracting entity for reranking")
-                entity_prompt = f"Identify the specific Python class or function name that is likely causing the error in this issue. Return ONLY the name, nothing else.\n\nIssue: {task}"
-                try:
-                    response = model.query([{"role": "user", "content": entity_prompt}])
-                    entity_name = response.get("content", "").strip()
-                    if not entity_name:
-                        entity_name = None
-                except Exception:
-                    entity_name = None
-            file_extensions = config.get("run", {}).get("retrieval_file_extensions", [".py"])
-            index_all_files = config.get("run", {}).get("retrieval_index_all_files", False)
-            source_path_prefix: str | None = None
-            if retrieval_strategy == "bm25_source":
+            
+            if retrieval_strategy == "hybrid":
+                from minisweagent.retrieval.hybrid import run_retrieval_in_container
+                chunk_size = config.get("run", {}).get("retrieval_chunk_size", 512)
+                chunk_overlap = config.get("run", {}).get("retrieval_chunk_overlap", 50)
+                embedding_weight = config.get("run", {}).get("retrieval_embedding_weight", 0.7)
+                bm25_weight = config.get("run", {}).get("retrieval_bm25_weight", 0.3)
+                embedding_model = config.get("run", {}).get("retrieval_embedding_model", "sentence-transformers/all-MiniLM-L6-v2")
+                file_extensions = config.get("run", {}).get("retrieval_file_extensions", [".py"])
+                index_all_files = config.get("run", {}).get("retrieval_index_all_files", False)
+                source_path_prefix: str | None = None
                 repo_name = instance_id.split("__")[0] if "__" in instance_id else None
                 if repo_name:
                     repo_source_paths = config.get("run", {}).get("retrieval_repo_source_paths", {})
                     source_path_prefix = repo_source_paths.get(repo_name)
-            retrieved_files = run_retrieval_in_container(
-                env, task, retrieval_strategy, top_k=10,
-                file_extensions=file_extensions, index_all_files=index_all_files,
-                source_path_prefix=source_path_prefix, entity_name=entity_name
-            )
+                retrieved_files = run_retrieval_in_container(
+                    env, task, retrieval_strategy, top_k=10,
+                    file_extensions=file_extensions, index_all_files=index_all_files,
+                    source_path_prefix=source_path_prefix,
+                    chunk_size=chunk_size, chunk_overlap=chunk_overlap,
+                    embedding_weight=embedding_weight, bm25_weight=bm25_weight,
+                    embedding_model=embedding_model
+                )
+            else:
+                from minisweagent.retrieval.bm25 import run_retrieval_in_container
+                entity_name: str | None = None
+                if retrieval_strategy == "bm25_two_stage":
+                    progress_manager.update_instance_status(instance_id, "Extracting entity for reranking")
+                    entity_prompt = f"Identify the specific Python class or function name that is likely causing the error in this issue. Return ONLY the name, nothing else.\n\nIssue: {task}"
+                    try:
+                        response = model.query([{"role": "user", "content": entity_prompt}])
+                        entity_name = response.get("content", "").strip()
+                        if not entity_name:
+                            entity_name = None
+                    except Exception:
+                        entity_name = None
+                file_extensions = config.get("run", {}).get("retrieval_file_extensions", [".py"])
+                index_all_files = config.get("run", {}).get("retrieval_index_all_files", False)
+                source_path_prefix: str | None = None
+                if retrieval_strategy == "bm25_source":
+                    repo_name = instance_id.split("__")[0] if "__" in instance_id else None
+                    if repo_name:
+                        repo_source_paths = config.get("run", {}).get("retrieval_repo_source_paths", {})
+                        source_path_prefix = repo_source_paths.get(repo_name)
+                retrieved_file_paths = run_retrieval_in_container(
+                    env, task, retrieval_strategy, top_k=10,
+                    file_extensions=file_extensions, index_all_files=index_all_files,
+                    source_path_prefix=source_path_prefix, entity_name=entity_name
+                )
+                retrieved_files = []
+                for file_path in retrieved_file_paths:
+                    full_path = f"/testbed/{file_path}" if not file_path.startswith("/") else file_path
+                    result = env.execute(f"cat {full_path}", cwd="/testbed")
+                    content = result["output"] if result["returncode"] == 0 else ""
+                    retrieved_files.append({"path": file_path, "content": content})
         
         agent = ProgressTrackingAgent(
             model,
@@ -234,7 +264,7 @@ def main(
     redo_existing: bool = typer.Option(False, "--redo-existing", help="Redo existing instances", rich_help_panel="Data selection"),
     config_spec: Path = typer.Option( builtin_config_dir / "extra" / "swebench.yaml", "-c", "--config", help="Path to a config file", rich_help_panel="Basic"),
     environment_class: str | None = typer.Option( None, "--environment-class", help="Environment type to use. Recommended are docker or singularity", rich_help_panel="Advanced"),
-    retrieval: str = typer.Option("none", "--retrieval", help="Retrieval strategy: none, bm25 (all files), bm25_py (Python files only), bm25_source (source code only), bm25_two_stage (two-stage with reranking)", rich_help_panel="Advanced"),
+    retrieval: str = typer.Option("none", "--retrieval", help="Retrieval strategy: none, bm25 (all files), bm25_py (Python files only), bm25_source (source code only), bm25_two_stage (two-stage with reranking), hybrid (chunk-based embedding+BM25)", rich_help_panel="Advanced"),
 ) -> None:
     # fmt: on
     output_path = Path(output)
